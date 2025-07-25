@@ -2,56 +2,87 @@ import crypto from "crypto";
 import axios from "axios";
 
 export class KucoinPay {
-    // 🔁 Toggle between dev/prod keys
+    // 🔁 Set to true for production, false for development/testing
     private static readonly isProd = false;
 
+    // IMPORTANT: Replace these with your actual keys from the KuCoin Pay merchant portal.
     private static readonly privateKey = KucoinPay.isProd
-        ? `-----BEGIN RSA PRIVATE KEY-----
-<PROD_PRIVATE_KEY_HERE>
------END RSA PRIVATE KEY-----`
-        : `-----BEGIN RSA PRIVATE KEY-----
-<DEV_PRIVATE_KEY_HERE>
------END RSA PRIVATE KEY-----`;
+        ? `-----BEGIN PRIVATE KEY-----
+<PROD_MERCHANT_PRIVATE_KEY_HERE>
+-----END PRIVATE KEY-----`
+        : `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCp0e+xBCpYn7sN
+...
+-----END PRIVATE KEY-----`;
 
     private static readonly kucoinPublicKey = KucoinPay.isProd
         ? `-----BEGIN PUBLIC KEY-----
 <PROD_KUCOIN_PUBLIC_KEY_HERE>
 -----END PUBLIC KEY-----`
         : `-----BEGIN PUBLIC KEY-----
-<DEV_KUCOIN_PUBLIC_KEY_HERE>
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtoBCARs32p3kv2kG2gdg
+...
 -----END PUBLIC KEY-----`;
 
     private static readonly apiKey = KucoinPay.isProd
         ? "<PROD_API_KEY>"
-        : "<DEV_API_KEY>";
+        : "kucoinpaytest";
 
-    // 🧠 1. Generate signature for request
-    static generateSignature(params: Record<string, any>): string {
-        const sortedString = Object.entries(params)
-            .filter(([_, v]) => v !== undefined && v !== "")
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([k, v]) => `${k}=${v}`)
-            .join("&");
+    private static readonly baseUrl = "https://pay.kucoin.com";
+
+    /**
+     * Generates a request signature based on a specific key order.
+     * @param params - The request parameters.
+     * @param keyOrder - An array defining the exact order of keys for the signature string.
+     * @returns The Base64 encoded signature.
+     */
+    private static generateSignature(params: Record<string, any>, keyOrder: string[]): string {
+        const toSignArray = keyOrder.map(key => {
+            const value = params[key];
+            // Filter out empty or undefined values as per documentation [cite: 115]
+            if (value !== undefined && value !== null && value !== "") {
+                return `${key}=${value}`;
+            }
+            return null;
+        }).filter(item => item !== null);
+
+        const sortedString = toSignArray.join("&");
+        //logger.info("String to Sign:", sortedString);
 
         const signer = crypto.createSign("RSA-SHA256");
         signer.update(sortedString, "utf8");
         return signer.sign(KucoinPay.privateKey, "base64");
     }
 
-    // 🛡️ 2. Verify webhook or response
-    static verifySignature(signature: string, params: Record<string, any>): boolean {
-        const sortedString = Object.entries(params)
-            .filter(([_, v]) => v !== undefined && v !== "")
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([k, v]) => `${k}=${v}`)
-            .join("&");
+    /**
+     * Verifies an incoming webhook signature.
+     * @param signature - The signature from the PAY-API-SIGN header.
+     * @param body - The raw request body from the webhook.
+     * @param keyOrder - An array defining the exact order of keys for verification.
+     * @returns True if the signature is valid, false otherwise.
+     */
+    static verifySignature(signature: string, body: Record<string, any>, keyOrder: string[]): boolean {
+        const toVerifyArray = keyOrder.map(key => {
+            const value = body[key];
+            if (value !== undefined && value !== null && value !== "") {
+                return `${key}=${value}`;
+            }
+            return null;
+        }).filter(item => item !== null);
+
+        const stringToVerify = toVerifyArray.join("&");
+        //logger.info("String to Verify:", stringToVerify);
 
         const verifier = crypto.createVerify("RSA-SHA256");
-        verifier.update(sortedString, "utf8");
+        verifier.update(stringToVerify, "utf8");
         return verifier.verify(KucoinPay.kucoinPublicKey, signature, "base64");
     }
 
-    // 🛒 3. Create Order (Live API Call)
+    /**
+     * Creates a payment order with KuCoin Pay.
+     * @param body - The request body for creating an order.
+     * @returns The API response from KuCoin Pay.
+     */
     static async createOrder(body: {
         requestId: string;
         orderAmount: number;
@@ -59,12 +90,12 @@ export class KucoinPay {
         goods: { goodsId: string; goodsName: string; goodsDesc?: string }[];
         returnUrl: string;
         cancelUrl: string;
-        source?: string;
-        subMerchantId?: string;
+        source?: "WEB" | "ANDROID" | "IOS";
         reference?: string;
         expireTime?: number;
     }) {
         const timestamp = Date.now();
+        const url = `${this.baseUrl}/api/kucoinpay/api/v1/order/create`;
 
         const payload = {
             ...body,
@@ -72,7 +103,13 @@ export class KucoinPay {
             timestamp,
         };
 
-        const signature = KucoinPay.generateSignature(payload);
+        // The key order MUST match the documentation for the Create Order API 
+        const keyOrder = [
+            "apiKey", "expireTime", "orderAmount", "orderCurrency", "reference",
+            "requestId", "source", "subMerchantId", "timestamp"
+        ];
+
+        const signature = KucoinPay.generateSignature(payload, keyOrder);
 
         const headers = {
             "Content-Type": "application/json",
@@ -82,32 +119,12 @@ export class KucoinPay {
             "PAY-API-TIMESTAMP": timestamp.toString(),
         };
 
-        const url = "https://pay.kucoin.com/api/kucoinpay/api/v1/order/create";
-
         try {
-            const res = await axios.post(url, payload, { headers });
+            const res = await axios.post(url, body, { headers });
             return res.data;
         } catch (err: any) {
-            console.error("Order creation failed:", err?.response?.data || err.message);
+            //logger.error("KuCoin Pay order creation failed:", err?.response?.data || err.message);
             throw err;
         }
-    }
-
-    // 🧪 4. Test Signature Generation & Verification
-    static testSignatureFlow() {
-        const testParams = {
-            apiKey: "kucoinpaytest",
-            requestId: "test-123",
-            orderAmount: 1,
-            orderCurrency: "USDT",
-            timestamp: Date.now(),
-        };
-
-        const signature = KucoinPay.generateSignature(testParams);
-        const valid = KucoinPay.verifySignature(signature, testParams);
-
-        console.log("Signature:", signature);
-        console.log("Is valid:", valid);
-        return valid;
     }
 }
