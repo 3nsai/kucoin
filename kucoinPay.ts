@@ -11,7 +11,7 @@ export class KucoinPay {
 <PROD_MERCHANT_PRIVATE_KEY_HERE>
 -----END PRIVATE KEY-----`
         : `-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCp0e+xBCpYn7sN
+SAMPLE
 ...
 -----END PRIVATE KEY-----`;
 
@@ -20,8 +20,7 @@ MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCp0e+xBCpYn7sN
 <PROD_KUCOIN_PUBLIC_KEY_HERE>
 -----END PUBLIC KEY-----`
         : `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtoBCARs32p3kv2kG2gdg
-...
+..SAMPLE.
 -----END PUBLIC KEY-----`;
 
     private static readonly apiKey = KucoinPay.isProd
