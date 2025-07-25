@@ -1,0 +1,2 @@
+# kucoin
+wrapper for kucoin
